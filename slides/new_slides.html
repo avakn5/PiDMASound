@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bare-Metal Audio on Raspberry Pi</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background: #0a0a0a; color: #e0e0e0; overflow: hidden;
+  }
+  .slide {
+    display: none;
+    width: 100vw; height: 100vh;
+    padding: 50px 70px;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .slide.active { display: flex; }
+  h1 { font-size: 3.1em; color: #fff; margin-bottom: 16px; letter-spacing: -1px; }
+  h2 { font-size: 2.3em; color: #4fc3f7; margin-bottom: 24px; }
+  h3 { font-size: 1.35em; color: #81d4fa; margin-bottom: 10px; }
+  p, li {
+    font-size: 1.16em;
+    line-height: 1.55;
+    color: #ccc;
+  }
+  ul { list-style: none; padding-left: 0; }
+  ul li { padding: 6px 0; }
+  ul li::before {
+    content: "\25B6";
+    color: #4fc3f7;
+    margin-right: 12px;
+    font-size: 0.7em;
+  }
+  .subtitle { font-size: 1.35em; color: #888; margin-top: 8px; }
+  .code-block {
+    background: #141424;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin: 14px 0;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.98em;
+    line-height: 1.5;
+    color: #a5d6a7;
+    white-space: pre-wrap;
+  }
+  .signal-chain {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin: 26px 0 12px;
+    flex-wrap: wrap;
+  }
+  .chain-box {
+    background: #1a237e;
+    border: 2px solid #4fc3f7;
+    border-radius: 12px;
+    padding: 18px 20px;
+    text-align: center;
+    font-size: 1em;
+    color: #fff;
+    min-width: 145px;
+  }
+  .chain-arrow {
+    font-size: 1.8em;
+    color: #4fc3f7;
+    padding: 0 10px;
+  }
+  .chain-label {
+    font-size: 0.72em;
+    color: #b0bec5;
+    margin-top: 5px;
+    line-height: 1.35;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 14px 0;
+    width: 100%;
+  }
+  th, td {
+    padding: 10px 18px;
+    text-align: left;
+    border-bottom: 1px solid #333;
+    font-size: 1.02em;
+    vertical-align: top;
+  }
+  th { color: #4fc3f7; font-weight: 600; }
+  td:last-child { color: #d7d7d7; }
+  .mono { font-family: 'SF Mono', 'Fira Code', monospace; color: #a5d6a7; }
+  .slide-num {
+    position: fixed;
+    bottom: 20px; right: 30px;
+    font-size: 0.9em; color: #555;
+  }
+  .title-slide { text-align: center; }
+  .title-slide h1 { font-size: 3.8em; margin-bottom: 8px; }
+  .two-col {
+    display: flex;
+    gap: 34px;
+    margin-top: 12px;
+  }
+  .two-col > div { flex: 1; }
+  .highlight { color: #ffb74d; font-weight: bold; }
+  .file-list { margin: 12px 0; }
+  .file-list .fname {
+    color: #a5d6a7;
+    font-family: monospace;
+    font-size: 1.05em;
+  }
+  .file-list .fdesc {
+    color: #888;
+    font-size: 0.96em;
+    margin-left: 8px;
+  }
+  .demo-slide { text-align: center; }
+  .demo-slide h2 { font-size: 2.8em; margin-bottom: 22px; }
+  .takeaway {
+    background: linear-gradient(135deg, #16204d, #0d386a);
+    border-radius: 16px;
+    padding: 24px 30px;
+    margin: 14px 0;
+  }
+  .takeaway li { color: #e0e0e0; }
+  .small { font-size: 0.96em; color: #999; }
+  .center { text-align: center; }
+  .note-box {
+    margin-top: 18px;
+    padding: 14px 18px;
+    background: #111827;
+    border-left: 4px solid #4fc3f7;
+    border-radius: 8px;
+    color: #cfd8dc;
+  }
+  .key-hint {
+    position: fixed;
+    bottom: 20px; left: 30px;
+    font-size: 0.8em; color: #444;
+  }
+</style>
+</head>
+<body>
+
+<!-- Slide 1 -->
+<div class="slide title-slide" id="s1">
+  <h1>Bare-Metal Audio<br>on Raspberry Pi</h1>
+  <p class="subtitle">Real-time audio synthesis bare-metal.</p>
+  <p style="margin-top:26px; font-size:1.08em; color:#777;">
+      Just GPIO, high speed outputs, interrupts, timing, and sound.
+  </p>
+  <p style="margin-top:36px; font-size:1.02em; color:#666;">CS140E &mdash; Winter 2026 &mdash; Ava Kouhana</p>
+</div>
+
+<!-- Slide 2 -->
+<div class="slide" id="s2">
+  <h2>The Challenge</h2>
+  <ul>
+    <li> To play audio we need an analog signal. But, <span class="highlight">bare metal</span>, the gpio can only output digital levels: 0 and 3.3V .</li>
+    <li>Available: <span class="highlight">GPIO, PWM, DMA, Interrupts</span>.</li>
+    <li>Goal: produce <span class="highlight">recognizable music</span> from a single digital pin using interrupts, and memory optimization.</li>
+  </ul>
+  <div class="note-box">
+    Core problem: how do we turn a 1-bit digital output into something that sounds like analog audio?
+  </div>
+</div>
+
+<!-- Slide 3 -->
+<div class="slide" id="s3">
+  <h2>System Overview</h2>
+  <style>
+    @keyframes chain-fade-in {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    #s3 .signal-chain .chain-box,
+    #s3 .signal-chain .chain-arrow {
+      opacity: 0;
+      animation: chain-fade-in 0.4s ease forwards;
+    }
+    #s3 .signal-chain > :nth-child(1)  { animation-delay: 0.2s; }
+    #s3 .signal-chain > :nth-child(2)  { animation-delay: 0.45s; }
+    #s3 .signal-chain > :nth-child(3)  { animation-delay: 0.7s; }
+    #s3 .signal-chain > :nth-child(4)  { animation-delay: 0.95s; }
+    #s3 .signal-chain > :nth-child(5)  { animation-delay: 1.2s; }
+    #s3 .signal-chain > :nth-child(6)  { animation-delay: 1.45s; }
+    #s3 .signal-chain > :nth-child(7)  { animation-delay: 1.7s; }
+    #s3 .signal-chain > :nth-child(8)  { animation-delay: 1.95s; }
+    #s3 .signal-chain > :nth-child(9)  { animation-delay: 2.2s; }
+    #s3 .signal-chain > :nth-child(10) { animation-delay: 2.45s; }
+    #s3 .signal-chain > :nth-child(11) { animation-delay: 2.7s; }
+    #s3 .signal-chain > :nth-child(12) { animation-delay: 2.95s; }
+    #s3 .signal-chain > :nth-child(13) { animation-delay: 3.2s; }
+    #s3 .signal-chain > :nth-child(14) { animation-delay: 3.45s; }
+    #s3 .signal-chain > :nth-child(15) { animation-delay: 3.7s; }
+    #s3 .signal-chain > :nth-child(16) { animation-delay: 3.95s; }
+    #s3 table {
+      opacity: 0;
+      animation: chain-fade-in 0.5s ease forwards;
+      animation-delay: 4.2s;
+    }
+  </style>
+  <div class="signal-chain">
+    <div class="chain-box">PCM Samples<div class="chain-label">16-bit audio values</div></div>
+    <div class="chain-arrow">&rarr;</div>
+    <div class="chain-box">Sigma-Delta<div class="chain-label">converts amplitude<br>to pulse density</div></div>
+    <div class="chain-arrow">&rarr;</div>
+    <div class="chain-box">ISR<div class="chain-label">CPU fills PDM buffer<br>on DMA interrupt</div></div>
+    <div class="chain-arrow">&rarr;</div>
+    <div class="chain-box">DMA<div class="chain-label">streams buffer<br>to PWM FIFO</div></div>
+    <div class="chain-arrow">&rarr;</div>
+    <div class="chain-box">PWM<div class="chain-label">serializer shifts out<br>bits @ 2.8 MHz</div></div>
+    <div class="chain-arrow">&rarr;</div>
+    <div class="chain-box">GPIO 18<div class="chain-label">1-bit output:<br>0V / 3.3V</div></div>
+    <div class="chain-arrow">&rarr;</div>
+    <div class="chain-box">Low-Pass Filter<div class="chain-label">converts digital<br>signal to analog</div></div>
+    <div class="chain-arrow">&rarr;</div>
+    <div class="chain-box">Speaker<div class="chain-label">recover audible<br>waveform</div></div>
+  </div>
+  <table>
+    <tr><th>Stage</th><th>What it does</th></tr>
+    <tr><td>PCM</td><td>Standard audio representation: each sample stores amplitude.</td></tr>
+    <tr><td>Sigma-Delta</td><td>Converts each 16-bit sample into 64 one-bit pulses.</td></tr>
+    <tr><td>ISR (Interrupt)</td><td>CPU runs sigma-delta modulator to refill the free PDM buffer when DMA finishes one.</td></tr>
+    <tr><td>DMA</td><td>Reads PDM words from memory and writes them to the PWM FIFO &mdash; no CPU involved.</td></tr>
+    <tr><td>PWM</td><td>Serializer shifts out each 32-bit FIFO word one bit at a time onto GPIO 18 at 2.8 MHz.</td></tr>
+    <tr><td>Low-Pass Filter</td><td>Smooths the rapid pulses into a continuous analog voltage.</td></tr>
+    <tr><td>Speaker</td><td>Converts the analog voltage into sound waves.</td></tr>
+  </table>
+</div>
+
+<!-- Slide 9 -->
+<div class="slide" id="s9">
+  <h2>Concretely what's happening ? </h2>
+  <p style="margin-bottom:18px;">We us Interrupts as a memory optimization <span class="highlight">two tiny buffers</span> instead of one massive one.</p>
+
+  <div style="display:flex; gap:40px; align-items:flex-start; margin-top:10px;">
+
+    <!-- LEFT: One Huge Buffer -->
+    <div style="flex:1; text-align:center;">
+      <h3 style="color:#ef5350;">Without interrupts: one huge buffer</h3>
+      <div style="position:relative; margin:16px auto; width:220px;">
+        <!-- tall bar representing huge memory -->
+        <div id="huge-buf" style="
+          width:120px; margin:0 auto; background:linear-gradient(180deg,#b71c1c,#e53935);
+          border:2px solid #ef9a9a; border-radius:8px; overflow:hidden;
+          height:0; transition:height 1.2s ease-out;">
+          <span style="writing-mode:vertical-rl; color:#fff; font-size:0.85em; padding:10px 0; display:inline-block; margin-top:12px;">
+            Entire song in RAM
+          </span>
+        </div>
+        <div id="huge-label" style="margin-top:8px; color:#ef9a9a; font-size:0.95em; opacity:0; transition:opacity 0.6s;">
+          ~10 MB for 1 min @ 44.1 kHz
+        </div>
+      </div>
+      <ul style="text-align:left; margin-top:10px; font-size:0.95em;">
+        <li>Must pre-compute <span class="highlight">entire song</span></li>
+        <li>Wastes scarce bare-metal RAM</li>
+        <li>Cannot stream or generate on the fly</li>
+      </ul>
+    </div>
+
+    <!-- CENTER: arrow / "vs" -->
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding-top:60px;">
+      <span style="font-size:2.2em; color:#4fc3f7;">vs</span>
+    </div>
+
+    <!-- RIGHT: Double Buffer with Interrupts -->
+    <div style="flex:1; text-align:center;">
+      <h3 style="color:#66bb6a;">With interrupts: two small buffers</h3>
+
+      <div style="position:relative; margin:16px auto; display:flex; gap:24px; justify-content:center; align-items:flex-end; height:200px;">
+        <!-- Buffer A -->
+        <div style="text-align:center;">
+          <div id="bufA-status" style="font-size:0.8em; color:#81d4fa; margin-bottom:6px; min-height:20px;"></div>
+          <div id="bufA" style="
+            width:90px; height:60px; border-radius:8px;
+            border:2px solid #66bb6a; background:#1b5e20;
+            display:flex; align-items:center; justify-content:center;
+            font-size:0.9em; color:#a5d6a7; transition:all 0.4s;">
+            Buf A
+          </div>
+          <div style="font-size:0.78em; color:#888; margin-top:4px;">64 bytes</div>
+        </div>
+
+        <!-- Buffer B -->
+        <div style="text-align:center;">
+          <div id="bufB-status" style="font-size:0.8em; color:#81d4fa; margin-bottom:6px; min-height:20px;"></div>
+          <div id="bufB" style="
+            width:90px; height:60px; border-radius:8px;
+            border:2px solid #66bb6a; background:#1b5e20;
+            display:flex; align-items:center; justify-content:center;
+            font-size:0.9em; color:#a5d6a7; transition:all 0.4s;">
+            Buf B
+          </div>
+          <div style="font-size:0.78em; color:#888; margin-top:4px;">64 bytes</div>
+        </div>
+
+        <!-- DMA / Speaker target -->
+        <div style="text-align:center; margin-left:18px;">
+          <div style="font-size:0.8em; color:#4fc3f7; margin-bottom:6px; min-height:20px;">output</div>
+          <div id="speaker-icon" style="
+            width:70px; height:60px; border-radius:8px;
+            border:2px solid #4fc3f7; background:#0d47a1;
+            display:flex; align-items:center; justify-content:center;
+            font-size:1.4em;">
+            &#x1f50a;
+          </div>
+          <div style="font-size:0.78em; color:#888; margin-top:4px;">GPIO&rarr;Speaker</div>
+        </div>
+      </div>
+
+      <!-- Interrupt flash indicator -->
+      <div id="irq-flash" style="
+        margin:8px auto; padding:6px 16px; border-radius:6px;
+        background:#ff6f00; color:#fff; font-size:0.88em; font-weight:bold;
+        opacity:0; transition:opacity 0.2s; display:inline-block;">
+        &#9889; IRQ fires &mdash; swap buffers!
+      </div>
+
+      <div id="dbl-label" style="margin-top:6px; color:#a5d6a7; font-size:0.95em; opacity:0; transition:opacity 0.6s;">
+        Total: 128 bytes &mdash; 80,000&times; less memory
+      </div>
+
+      <ul style="text-align:left; margin-top:10px; font-size:0.95em;">
+        <li>DMA plays one buffer while CPU fills the other</li>
+        <li>Interrupt signals when to <span class="highlight">swap</span></li>
+        <li>Streams forever with constant memory</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- Slide 6 -->
+<div class="slide" id="s6">
+  <h2>Why DMA Is Necessary</h2>
+  <div class="two-col">
+    <div>
+      <h3>What the CPU would have to do</h3>
+      <ul>
+        <li>Toggle GPIO for every PDM bit</li>
+        <li>Meet a bit rate of <span class="highlight">1.4112 MHz</span> which is impossible for the CPU</li>
+        <li>That is one output update every <span class="highlight">~709 ns</span></li>
+      </ul>
+      <div class="code-block">bit_period = 1 / 1,411,200
+           ~= 709 ns</div>
+    </div>
+      <div class="note-box">
+        DMA is used to stream PDM audio data to the PWM hardware without CPU involvement. DMA solves this by streaming memory directly to the GPIO peripheral with deterministic hardware timing. The DMA is paced by the PWM to move at a (high) given frequency the data to gpio.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Slide 7 -->
+<div class="slide" id="s7">
+  <h2> Why is PWM necessary ? Clocking and Timing</h2>
+  <p>PWM is used here as a <span class="highlight">hardware pacing source</span> for DMA, not as the audio signal itself.</p>
+  <div class="code-block">PLLD clock:       500 MHz
+Clock divider:    44.29
+PWM clock:        11.2896 MHz
+Oversampling:     32x
+Audio sample rate: 11.2896 MHz / 32 = 44.1 kHz</div>
+  <ul>
+    <li>Target audio rate: <span class="highlight">44,100 samples/second</span></li>
+    <li>Target bit rate: <span class="highlight">44,100 × 32 = 1,411,200 bits/second</span></li>
+    <li>If timing is off, the pitch and audio quality are wrong</li>
+  </ul>
+  <div class="note-box">
+    This is why getting the divisor chain right mattered so much: a 4× timing mistake makes the audio obviously wrong.
+  </div>
+</div>
+
+
+<script>
+(function() {
+  // Slide 9 animation
+  const s9 = document.getElementById('s9');
+  let s9timer = null;
+
+  function startS9Animation() {
+    const hugeBuf = document.getElementById('huge-buf');
+    const hugeLabel = document.getElementById('huge-label');
+    const bufA = document.getElementById('bufA');
+    const bufB = document.getElementById('bufB');
+    const bufAStatus = document.getElementById('bufA-status');
+    const bufBStatus = document.getElementById('bufB-status');
+    const irqFlash = document.getElementById('irq-flash');
+    const dblLabel = document.getElementById('dbl-label');
+
+    // Reset
+    hugeBuf.style.height = '0';
+    hugeLabel.style.opacity = '0';
+    dblLabel.style.opacity = '0';
+    irqFlash.style.opacity = '0';
+    bufA.style.background = '#1b5e20';
+    bufB.style.background = '#1b5e20';
+    bufAStatus.textContent = '';
+    bufBStatus.textContent = '';
+
+    // Phase 1: grow huge buffer
+    setTimeout(() => { hugeBuf.style.height = '260px'; }, 300);
+    setTimeout(() => { hugeLabel.style.opacity = '1'; }, 1600);
+
+    // Phase 2: start ping-pong animation
+    let playing = 0; // 0 = A playing, 1 = B playing
+    const playColor = '#0d47a1';
+    const fillColor = '#33691e';
+    const idleColor = '#1b5e20';
+
+    function pingPong() {
+      if (playing === 0) {
+        bufA.style.background = playColor;
+        bufA.style.borderColor = '#42a5f5';
+        bufAStatus.textContent = '▶ DMA playing';
+        bufB.style.background = fillColor;
+        bufB.style.borderColor = '#66bb6a';
+        bufBStatus.textContent = '⟳ CPU filling';
+      } else {
+        bufB.style.background = playColor;
+        bufB.style.borderColor = '#42a5f5';
+        bufBStatus.textContent = '▶ DMA playing';
+        bufA.style.background = fillColor;
+        bufA.style.borderColor = '#66bb6a';
+        bufAStatus.textContent = '⟳ CPU filling';
+      }
+
+      // flash IRQ after a delay, then swap
+      setTimeout(() => {
+        irqFlash.style.opacity = '1';
+        setTimeout(() => { irqFlash.style.opacity = '0'; }, 600);
+      }, 1000);
+
+      playing ^= 1;
+    }
+
+    setTimeout(() => {
+      dblLabel.style.opacity = '1';
+      pingPong();
+      s9timer = setInterval(pingPong, 1800);
+    }, 2400);
+  }
+
+  function stopS9Animation() {
+    if (s9timer) { clearInterval(s9timer); s9timer = null; }
+  }
+
+  // Watch for slide becoming active
+  const observer = new MutationObserver(() => {
+    if (s9.classList.contains('active')) startS9Animation();
+    else stopS9Animation();
+  });
+  observer.observe(s9, { attributes: true, attributeFilter: ['class'] });
+
+  // If already active on load
+  if (s9.classList.contains('active')) startS9Animation();
+})();
+</script>
+
+<!-- Slide 10 -->
+<div class="slide" id="s10">
+  <h2>How to debug it ?</h2>
+  <div class="two-col">
+    <div>
+      <h3>With an oscilloscope and a sine wave</h3>
+  
+      <img src="/Users/akouhana/CS140E/PiDMASound/slides/asset2.jpeg" 
+           alt="Oscilloscope sine wave" 
+           style="width:100%; max-width:500px; margin-top:20px;">
+    </div>
+  </div>
+
+
+</div>
+
+<!-- Slide 12 -->
+<div class="slide demo-slide" id="s12">
+  <h2>Live Demo</h2>
+  <p style="margin-top:20px; font-size:1.18em; color:#bbb;">
+    Pop quizz -> can you recognize those famous songs ?
+  </p>
+  <div class="takeaway" style="margin-top:28px; text-align:left;">
+    <ul>
+      <li>Pitch should be stable: timing is generated entirely by hardware</li>
+      <li> 5 SONGS</li>
+    </ul>
+  </div>
+</div>
+
+<div class="slide-num"><span id="current">1</span> / <span id="total">14</span></div>
+<div class="key-hint">&larr; &rarr; arrow keys to navigate</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  let current = 0;
+
+  function show(n) {
+    slides[current].classList.remove('active');
+    current = Math.max(0, Math.min(n, slides.length - 1));
+    slides[current].classList.add('active');
+    document.getElementById('current').textContent = current + 1;
+    document.getElementById('total').textContent = slides.length;
+  }
+
+  show(0);
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') show(current + 1);
+    if (e.key === 'ArrowLeft') show(current - 1);
+  });
+
+  document.addEventListener('click', e => {
+    if (e.clientX > window.innerWidth / 2) show(current + 1);
+    else show(current - 1);
+  });
+</script>
+</body>
+</html>
